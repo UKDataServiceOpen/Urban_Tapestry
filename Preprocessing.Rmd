@@ -1,0 +1,204 @@
+---
+title: "Preprocessing"
+output: pdf_document
+date: "2024-05-13"
+---
+
+```{r setup}
+require(httr)
+require(jsonlite)
+require(dplyr)
+library(readr)
+library(janitor)
+library(sf)
+library(stringr)
+library(readODS)
+library(readxl)
+library(janitor)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(ggplot2)
+```
+
+## Install all datasets, clean and join 
+
+```{r land use dataset}
+
+data_raw <- read_excel("Data/template_land_use.xlsx")
+
+data <- read_excel("Data/template_land_use.xlsx", 
+                   skip = 5) %>% clean_names() %>% 
+  rename(group_community_services = 'total_8', 
+         group_defence = 'total_9', 
+         group_industry_commerce = 'total_14', 
+         group_minerals_landfill = 'total_17', 
+         group_other_developed = 'total_29', 
+         group_residential = 'total_20', 
+         group_transport_utilities = 'total_24',
+         total_developed_use = 'total_31',
+         group_agriculture = 'total_35',
+         group_forestry = 'total_40', 
+         group_outdoor_recreation = 'total_41', 
+         group_residential_gardens = 'total_42',
+         group_undeveloped_land = 'total_43',
+         total_non_developed_use = 'total_45', 
+         total_vaccant_land_use = 'total_47', 
+         grand_total = 'total_49') %>% 
+  remove_empty("cols") %>% 
+  remove_empty('rows') %>%
+  filter(!is.na(`total_developed_use`) & !is.na(`total_non_developed_use`) & !is.na(`total_vaccant_land_use`)) %>%
+    mutate(across(.cols = 6:44, 
+                .fns = ~ round(as.numeric(replace(.x, .x == '-', 0)), digits = 2)))
+
+data <- data %>% mutate_if(is.numeric, round, digits = 2)
+
+```
+
+```{r shapefile}
+##### shapefile 
+england_shape <- st_read("Data/england_shapefile/england_lsoa_2021.shp")
+ls(england_shape)
+#london_shape <- england_shape %>% 
+  #filter(str_detect(lsoa21nm, "City of London"))
+```
+
+```{r crime data}
+# this is collecting all crime data in England in the month of 2023
+path <- "Data/england_crime data/all"
+# List all CSV files in the directory
+file_list <- list.files(path, pattern = "*.csv", full.names = TRUE)
+# Read and combine all CSV files into a single data frame
+england_crimes <- file_list %>%
+  lapply(read_csv) %>%  # Read each file
+  bind_rows() %>%
+  clean_names()
+
+#Transform the dataframe with crime information into a sf object
+missing_rows <- which(is.na(england_crimes$longitude) | is.na(england_crimes$latitude))
+england_crimes <- england_crimes[!is.na(england_crimes$longitude) & !is.na(england_crimes$latitude), ]
+
+length(missing_rows)
+england_crimes_spatial <-  st_as_sf(england_crimes, coords = c("longitude", "latitude"), 
+                              crs = 4326, agr = "constant")
+
+### group crimes per lsoa 
+crimes_per_lsoa <- england_crimes %>%
+  group_by(lsoa_code) %>%
+  summarise(count=n())
+
+crimes_per_lsoa2 <- england_crimes %>%
+  group_by(lsoa_code) %>%
+  mutate(total_crimes = n()) %>%
+  group_by(lsoa_code, crime_type) %>%
+  summarise(count = n(), total_crimes = first(total_crimes)) %>%
+  ungroup()
+```
+
+```{r region lookup}
+lad_lookup <- read_csv("Data/lsoa_to_lad.csv") %>% clean_names() %>%
+  select(-c(1,2, 5, 8,9))
+region_lookup <- read_csv("Data/lsoa_to_rgn.csv") %>% clean_names() %>%
+  select(-c(5))
+
+region_info <- left_join(lad_lookup, region_lookup, by = c("lad22cd" = "lad21cd"))
+```
+
+
+```{r join}
+#add region info to land use 'data' 
+data <- left_join(data, region_info, by = c("lsoa_name" = "lsoa21nm")) 
+data <- data %>% 
+  relocate("rgn21cd", .after = "lsoa_name") 
+data <- data %>% 
+  relocate("rgn21nm", .after = "rgn21cd")  
+
+#join the england shape and crimes per lsoa
+england_lsoa <- left_join(england_shape, crimes_per_lsoa, by = c("lsoa21cd"="lsoa_code"))
+
+rm(full_data)
+
+#join the shapefile (now england_lsoa with the land use data) 
+full_data <- left_join(england_lsoa, data, by = c("lsoa21cd" = "lsoa_code")) %>%
+  #clean up 
+  select(-c(3, 4, 6, 9, 10, 11))
+
+#transform to the correct CRS
+st_crs(full_data)
+full_data <- st_transform(full_data, 4326)
+#select for just 'london boroughs' 
+london_data <- full_data %>% 
+  filter(str_detect(rgn21nm, "London"))
+
+###For full data with_crime types 
+#join the england shape and crimes per lsoa
+england_lsoa2 <- left_join(england_shape, crimes_per_lsoa2, by = c("lsoa21cd"="lsoa_code"))
+#join the shapefile (now england_lsoa with the land use data) 
+full_data_by_crime <- left_join(england_lsoa2, data, by = c("lsoa21cd" = "lsoa_code"))
+london_data_by_crime <- full_data_by_crime %>% 
+  filter(str_detect(rgn21nm, "London"))
+london_data_by_crime <- st_transform(london_data_by_crime, 4326)
+
+```
+
+
+```{r transform to corecr CRS and check missing values}
+st_crs(london_data_by_crime)
+
+sum(is.na(full_data$count)) #1362
+sum(is.na(london_data$count)) #13
+sum(is.na(full_data$geometry)) #0
+
+```
+
+
+
+```{r save and clean up}
+write_sf(full_data, "Data/full_data.shp")
+st_write(full_data, "Data/full_data.csv")
+# saveRDS(full_data, "Data/full_data.Rda")
+
+write_sf(london_data, "Data/london_data.shp")
+st_write(london_data, "Data/london_data.csv")
+# saveRDS(london_data, "Data/london_data.Rda")
+
+write_sf(london_data_by_crime, "Data/london_data_by_crime.shp")
+st_write(london_data_by_crime, "Data/london_data_by_crime.csv")
+#saveRDS(london_data_by_crime, "Data/london_data_by_crime.Rda")
+
+rm(list = ls())
+# full_data <- st_read("Data/full_data.shp")
+# london_data <- st_read("Data/london_data.shp")
+# london_data_by_crime <- st_read("Data/london_data_by_crime.shp")
+
+```
+
+
+
+### Loading the twitter data (for future work)
+
+```{r}
+# Load the jsonlite package
+library(jsonlite)
+# Load the data
+json_data <- readLines("Data/en_geo_2020-02-01.json")
+tweets <- fromJSON(paste(json_data, collapse = ""))
+
+read_json_lines <- function(file_path) {
+  con <- file(file_path, open = "r")
+  while (TRUE) {
+    line <- readLines(con, n = 1, warn = FALSE)
+    if (length(line) == 0) break
+    json <- tryCatch(fromJSON(line),
+                     error = function(e) return(NULL))
+    if (!is.null(json)) {
+      print(json)  # or process as needed
+    }
+  }
+  close(con)
+}
+
+# Use this function to read your downloaded file
+x <- read_json_lines("Data/en_geo_2020-02-01.json")
+```
+

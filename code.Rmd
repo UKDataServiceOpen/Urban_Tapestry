@@ -1,0 +1,835 @@
+---
+title: "Code Analysis"
+output: pdf_document
+date: "2024-05-14"
+---
+
+```{r setup, include=FALSE}
+require(httr)
+require(jsonlite)
+require(dplyr)
+library(readr)
+library(janitor)
+library(sf)
+library(stringr)
+library(readODS)
+library(readxl)
+library(janitor)
+library(dplyr)
+library(tidyr)
+library(purrr)
+library(tmap)
+library(spdep)
+library(spatialreg)
+library(ggplot2)
+library(plotly)
+library(broom)
+```
+
+
+```{r read in the csv data }
+london_data <- read_csv("Data/london_data.csv")
+full_data <- read_csv("Data/full_data.csv") 
+```
+
+
+## 1) Proportion of land by land-use-type across England
+
+```{r}
+# Calculate total land area and proportions, handling NAs properly
+total_land_area <- sum(full_data$total_developed_use, na.rm = TRUE) +
+  sum(full_data$total_non_developed_use, na.rm = TRUE) +
+  sum(full_data$total_vaccant_land_use, na.rm = TRUE)
+
+proportions <- c(
+  sum(full_data$total_developed_use, na.rm = TRUE),
+  sum(full_data$total_non_developed_use, na.rm = TRUE),
+  sum(full_data$total_vaccant_land_use, na.rm = TRUE)
+) / total_land_area
+
+# Assign names to the proportions for clarity
+names(proportions) <- c("total_developed_use", "total_non_developed_use", "total_vacant_land_use")
+
+# Print the results
+print(proportions)
+```
+
+total_developed_use       total_non_developed_use   total_vacant_land_use 
+            0.086874274             0.911214461             0.001911265 
+
+
+## 2) Proportion of land by land-use-type across London
+
+```{r}
+# Calculate total land area and proportions, handling NAs properly
+total_land_area <- sum(london_data$total_developed_use, na.rm = TRUE) +
+  sum(london_data$total_non_developed_use, na.rm = TRUE) +
+  sum(london_data$total_vaccant_land_use, na.rm = TRUE)
+
+proportions <- c(
+  sum(london_data$total_developed_use, na.rm = TRUE),
+  sum(london_data$total_non_developed_use, na.rm = TRUE),
+  sum(london_data$total_vaccant_land_use, na.rm = TRUE)
+) / total_land_area
+
+# Assign names to the proportions for clarity
+names(proportions) <- c("total_developed_use", "total_non_developed_use", "total_vacant_land_use")
+
+# Print the results
+print(proportions)
+
+
+# Summarizing land use types into a smaller dataframe for plotting
+land_use_summary <- full_data %>%
+  summarise(TotalDeveloped = sum(total_developed_use, na.rm = TRUE),
+            TotalNonDeveloped = sum(total_non_developed_use, na.rm = TRUE),
+            TotalVacant = sum(total_vaccant_land_use, na.rm = TRUE)) %>%
+  pivot_longer(cols = everything(), names_to = "LandUseType", values_to = "Area")
+
+# Pie chart using ggplot2
+ggplot(land_use_summary, aes(x = "", y = Area, fill = LandUseType)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  labs(fill = "Land Use Type", title = "Proportion of Land by Land Use Types in England 2022", 
+       caption = "Data collected from Land Use and Land Use Change Statistics 2022")
+
+## what about for london
+# Summarizing land use types into a smaller dataframe for plotting
+land_use_summary2 <- london_data %>%
+  summarise(TotalDeveloped = sum(total_developed_use, na.rm = TRUE),
+            TotalNonDeveloped = sum(total_non_developed_use, na.rm = TRUE),
+            TotalVacant = sum(total_vaccant_land_use, na.rm = TRUE)) %>%
+  pivot_longer(cols = everything(), names_to = "LandUseType", values_to = "Area")
+
+# Pie chart using ggplot2
+ggplot(land_use_summary2, aes(x = "", y = Area, fill = LandUseType)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  labs(fill = "Land Use Type", title = "Proportion of Land by Land Use Types in London 2022", 
+       caption = "Data collected from Land Use and Land Use Change Statistics 2022")
+
+
+# Combine data for plotting
+combined_data <- bind_rows(
+  land_use_summary %>% mutate(Region = "England"),
+  land_use_summary2 %>% mutate(Region = "London")
+)
+
+
+# Combine data for plotting
+combined_data <- bind_rows(
+  land_use_summary %>% mutate(Region = "England"),
+  land_use_summary2 %>% mutate(Region = "London")
+)
+
+# Plotting both charts in a single image using a colorblind-friendly palette
+ggplot(combined_data, aes(x = "", y = Area, fill = LandUseType)) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar(theta = "y") +
+  scale_fill_brewer(palette = "Set2", name = "Land Use Type") +
+  facet_wrap(~Region, ncol = 1, scales = "free_y") +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5),
+    plot.caption = element_text(hjust = 0.5)
+  ) +
+  labs(title = "Proportion of Land by Land Use Types",
+       caption = "Data: Land Use and Land Use Change Statistics 2022")
+```
+
+total_developed_use total_non_developed_use   total_vacant_land_use 
+            0.406250021             0.586207775             0.007542204
+            
+            
+
+## 1) Regional breakdown of land by land-use-type across England
+
+```{r}
+# Summarize total land use by type for each region
+summary_table <- full_data %>%
+  group_by(rgn21nm) %>%
+  summarise(
+    total_developed_use = sum(total_developed_use, na.rm = TRUE),
+    total_non_developed_use = sum(total_non_developed_use, na.rm = TRUE),
+    total_vaccant_land_use = sum(total_vaccant_land_use, na.rm = TRUE)
+  )
+
+# Print the summary table
+print(summary_table)
+
+# Optionally, create a bar plot for visual comparison
+data_long <- pivot_longer(summary_table, cols = c("total_developed_use", "total_non_developed_use", "total_vaccant_land_use"), names_to = "Land_Use_Type", values_to = "Area")
+ggplot(data_long, aes(x = rgn21nm, y = Area, fill = Land_Use_Type)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Regional Breakdown of Land Use 2022", x = "Region", y = "Area (hectares)") +
+  theme_bw()
+
+# Calculate proportions
+summary_table <- full_data %>%
+  group_by(rgn21nm) %>%
+  summarise(
+    total_developed_use = sum(total_developed_use, na.rm = TRUE),
+    total_non_developed_use = sum(total_non_developed_use, na.rm = TRUE),
+    total_vacant_land_use = sum(total_vaccant_land_use, na.rm = TRUE),
+    total_land_use = sum(total_developed_use + total_non_developed_use + total_vaccant_land_use, na.rm = TRUE)
+  ) %>%
+  mutate(
+    proportion_developed = total_developed_use / total_land_use,
+    proportion_non_developed = total_non_developed_use / total_land_use,
+    proportion_vacant = total_vacant_land_use / total_land_use
+  )
+
+# Ensure column names are consistent
+summary_table_long <- summary_table %>%
+  pivot_longer(
+    cols = c(proportion_developed, proportion_non_developed, proportion_vacant),
+    names_to = "land_use_type",
+    values_to = "proportion",
+    names_prefix = "proportion_"
+  )
+
+# Correct the fill argument if necessary
+ggplot(summary_table_long, aes(x = rgn21nm, y = proportion, fill = land_use_type)) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Proportion of Land Use Types by Regions in England 2022",
+       x = "Region",
+       y = "Proportion",
+       fill = "Land Use Type", 
+       caption = "Data Source: Land use and land use statistics 2022") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# ggplot(summary_table_long, aes(x = rgn21nm, y = proportion, fill = land_use_type)) +
+#   geom_bar(stat = "identity", position = "dodge", color = "black", size = 0.5) +
+#   labs(title = "Proportional Regional Breakdown of Land Use 2022", 
+#        x = "Region", 
+#        y = "Proportion",
+#        fill = "Land Use Type") +
+#   scale_y_continuous(labels = percent_format()) +
+#   scale_fill_brewer(palette = "Set2") +  # Using a professional color palette
+#   theme_classic() +
+#   theme(
+#     text = element_text(family = "Courier", size = 12),
+#     plot.title = element_text(hjust = 0.5, size = 14, face = "bold"),
+#     axis.title.x = element_text(size = 12),
+#     axis.title.y = element_text(size = 12),
+#     axis.text.x = element_text(angle = 45, hjust = 1),
+#     legend.title = element_text(size = 12),
+#     legend.text = element_text(size = 10),
+#     panel.grid.major = element_line(size = 0.5, linetype = 'solid', colour = "gray"),
+#     panel.grid.minor = element_line(size = 0.25, linetype = 'solid', colour = "lightgray")
+#   )
+
+```
+
+
+
+#Regional breakdown of land use categories within developed land and undeveloped land in England
+
+```{r}
+#develeoped
+developed_data <- full_data %>%
+  group_by(rgn21nm) %>%
+  summarise(
+    CommunityServices = sum(group_community_services, na.rm = TRUE),
+    Defence = sum(group_defence, na.rm = TRUE),
+    IndustryCommerce = sum(group_industry_commerce, na.rm = TRUE),
+    MineralsLandfill = sum(group_minerals_landfill, na.rm = TRUE),
+    OtherDeveloped = sum(group_other_developed, na.rm = TRUE),
+    Residential = sum(group_residential, na.rm = TRUE),
+    TransportUtilities = sum(group_transport_utilities, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = -rgn21nm, names_to = "LandUseType", values_to = "Area")
+
+ggplot(developed_data, aes(x = rgn21nm, y = Area, fill = LandUseType)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Regional Breakdown of Developed Land Use Types in England 2022", x = "Region", y = "Area (hectares)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+#non-developed
+non_developed_data <- full_data %>%
+  group_by(rgn21nm) %>%
+  summarise(
+    Agriculture = sum(group_agriculture, na.rm = TRUE),
+    Forestry = sum(group_forestry, na.rm = TRUE),
+    OutdoorRecreation = sum(group_outdoor_recreation, na.rm = TRUE),
+    ResidentialGardens = sum(group_residential_gardens, na.rm = TRUE),
+    UndevelopedLand = sum(group_undeveloped_land, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = -rgn21nm, names_to = "LandUseType", values_to = "Area")
+
+ggplot(non_developed_data, aes(x = rgn21nm, y = Area, fill = LandUseType)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Regional Breakdown of Non-Developed Land Use Types in England 2022", x = "Region", y = "Area (hectares)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+## #Regional breakdown of land use categories within developed land and undeveloped land in London
+ 
+```{r}
+#developed
+developed_data <- london_data %>%
+  group_by(rgn21nm) %>%
+  summarise(
+    CommunityServices = sum(group_community_services, na.rm = TRUE),
+    Defence = sum(group_defence, na.rm = TRUE),
+    IndustryCommerce = sum(group_industry_commerce, na.rm = TRUE),
+    MineralsLandfill = sum(group_minerals_landfill, na.rm = TRUE),
+    OtherDeveloped = sum(group_other_developed, na.rm = TRUE),
+    Residential = sum(group_residential, na.rm = TRUE),
+    TransportUtilities = sum(group_transport_utilities, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = -rgn21nm, names_to = "LandUseType", values_to = "Area")
+
+# Plot developed land use data
+ggplot(developed_data, aes(x = rgn21nm, y = Area, fill = LandUseType)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Regional Breakdown of Developed Land Use Types in London 2022", x = "Region", y = "Area (hectares)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+## non- developed 
+non_developed_data <- london_data %>%
+  group_by(rgn21nm) %>%
+  summarise(
+    Agriculture = sum(group_agriculture, na.rm = TRUE),
+    Forestry = sum(group_forestry, na.rm = TRUE),
+    OutdoorRecreation = sum(group_outdoor_recreation, na.rm = TRUE),
+    ResidentialGardens = sum(group_residential_gardens, na.rm = TRUE),
+    UndevelopedLand = sum(group_undeveloped_land, na.rm = TRUE)
+  ) %>%
+  pivot_longer(cols = -rgn21nm, names_to = "LandUseType", values_to = "Area")
+
+# Plot non-developed land use data
+ggplot(non_developed_data, aes(x = rgn21nm, y = Area, fill = LandUseType)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Regional Breakdown of Non-Developed Land Use Types in London 2022", x = "Region", y = "Area (hectares)") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+#### Lets map the infrascutre data
+
+```{r}
+# Example with 'community_buildings' and 'count'
+tm_shape(london_data) +
+  tm_polygons("cmmnty_",  
+              style = "quantile", 
+              palette = "Blues", 
+              title = "Community Buildings (Hectares)") +
+  tm_layout(title = "Distribution of Community Buildings by LSOA")
+
+
+tm_shape(london_data) +
+  tm_polygons("count", 
+              style = "quantile", 
+              palette = "Reds", 
+              title = "Crime Counts") +
+  tm_polygons("resdntl",
+              style = "quantile", 
+              palette = "Blues", 
+              title = "Community Buildings (Hectares)") +
+  tm_layout(title = "Crime Counts and Community Buildings by LSOA")
+
+tm_shape(london_data) +
+  tm_polygons("count", 
+              style = "quantile", 
+              palette = "Reds", 
+              title = "Crime Counts") +
+  tm_polygons("cmmnty_",
+              style = "quantile", 
+              palette = "Blues", 
+              title = "Community Buildings (Hectares)") +
+  tm_layout(title = "Crime Counts and Community Buildings by LSOA")
+```
+
+
+
+## correlation matrix
+
+```{r}
+install.packages("corrplot")
+library(corrplot)
+
+cor_matrix_dev <- cor(full_data[, c("group_community_services", "group_defence", "group_industry_commerce", 
+                      "group_minerals_landfill", "group_other_developed", "group_residential", 
+                      "group_transport_utilities")], use = "complete.obs")
+
+# Plotting the correlation matrix
+corrplot(cor_matrix_dev, method = "circle", type = "upper", order = "hclust",
+         tl.col = "black", tl.srt = 45, addCoef.col = "black")
+
+# Adding a title
+title("Correlation Matrix for Developed Land Use Types")
+
+cor_matrix_undev <- cor(full_data[, c("group_agriculture", "group_forestry", "group_outdoor_recreation", 
+                        "group_residential_gardens", "group_undeveloped_land")], use = "complete.obs")
+
+# Plotting the correlation matrix
+corrplot(cor_matrix_undev, method = "circle", type = "upper", order = "hclust",
+         tl.col = "black", tl.srt = 45, addCoef.col = "black")
+
+# Adding a title
+title("Correlation Matrix for Undeveloped Land Use Types")
+```
+
+
+### Lets explore the relationship with crime 
+
+```{r}
+##read in the sf objects here
+full_data <- st_read("Data/full_data.shp")
+london_data <- st_read("Data/london_data.shp")
+london_data_by_crime <- st_read("Data/london_data_by_crime.shp")
+
+# Scatter plot for crime counts and residential land use
+ggplot(full_data, aes(x = ttl_dv_, y = count)) +
+  geom_point(aes(color = rgn21nm), alpha = 0.5) +  # Optional: color points by region if relevant
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relationship between developed Land Use and Crime Counts in England",
+       x = "Residential Land Use (hectares)", y = "Crime Counts") +
+  theme_minimal()
+
+ggplot(full_data, aes(x = ttl_n__, y = count)) +
+  geom_point(aes(color = rgn21nm), alpha = 0.5) +  # Optional: color points by region if relevant
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relationship between undeveloped Land Use and Crime Counts in England",
+       x = "Residential Land Use (hectares)", y = "Crime Counts") +
+  theme_minimal()
+
+# Reshape the data to long format for easier plotting
+full_data_long <- full_data %>%
+  pivot_longer(cols = c(ttl_dv_, ttl_n__), names_to = "LandUseType", values_to = "LandUse") %>%
+  mutate(LandUseType = recode(LandUseType, ttl_dv_ = "Developed", ttl_n__ = "Undeveloped"))
+
+# Plotting both regression lines on the same plot
+ggplot(full_data_long, aes(x = LandUse, y = count, color = LandUseType)) +
+  geom_point(alpha = 0.5) +  # You can still color points by region by adding: aes(group = rgn21nm)
+  geom_smooth(method = "lm", se = TRUE, aes(linetype = LandUseType)) +  # Different linetypes for clarity
+  labs(title = "Relationship between Land Use and Crime Counts in England",
+       x = "Land Use (hectares)", y = "Crime Counts",
+       color = "Land Use Type", linetype = "Land Use Type") +
+  theme_minimal()
+
+#Regression model 
+model_dev_undev_eng <- lm(count ~ ttl_dv_ + ttl_n__, data = full_data)
+summary(model_dev_undev_eng)
+
+```
+
+
+```{r}
+## FOR LONDON 
+ggplot(london_data, aes(x = ttl_dv_, y = count)) +
+  geom_point(aes(color = rgn21nm), alpha = 0.5) +  # Optional: color points by region if relevant
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relationship between developed Land Use and Crime Counts in London",
+       x = "Residential Land Use (hectares)", y = "Crime Counts") +
+  theme_minimal()
+
+ggplot(london_data, aes(x = ttl_n__, y = count)) +
+  geom_point(aes(color = rgn21nm), alpha = 0.5) +  # Optional: color points by region if relevant
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(title = "Relationship between undeveloped Land Use and Crime Counts in London",
+       x = "Residential Land Use (hectares)", y = "Crime Counts") +
+  theme_minimal()
+
+london_data_long <- london_data %>%
+  pivot_longer(cols = c(ttl_dv_, ttl_n__), names_to = "LandUseType", values_to = "LandUse") %>%
+  mutate(LandUseType = recode(LandUseType, ttl_dv_ = "Developed", ttl_n__ = "Undeveloped"))
+
+# Plotting both regression lines on the same plot
+ggplot(london_data_long, aes(x = LandUse, y = count, color = LandUseType)) +
+  geom_point(alpha = 0.5) +  # You can still color points by region by adding: aes(group = rgn21nm)
+  geom_smooth(method = "lm", se = TRUE, aes(linetype = LandUseType)) +  # Different linetypes for clarity
+  labs(title = "Relationship between Land Use and Crime Counts in London",
+       x = "Land Use (hectares)", y = "Crime Counts",
+       color = "Land Use Type", linetype = "Land Use Type") +
+  theme_minimal()
+
+p <- ggplot(london_data, aes(x = ttl_dv_, y = count, text = paste("Region:", rgn21nm))) +
+  geom_point(aes(color = rgn21nm), alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  labs(x = "Developed Land Use (hectares)", y = "Crime Counts")
+ggplotly(p) %>% layout(title = 'Interactive plot of Developed Land Use vs. Crime Counts')
+
+
+```
+
+```{r looking specifically at the crime types in london}
+# Load necessary libraries
+head(london_data_by_crime)
+
+# Assuming london_data_by_crime has columns: LSOA, ttl_dv_, ttl_n__, count, CrimeType
+# Pivot longer to get LandUseType and LandUse
+london_data_by_crime_long <- london_data_by_crime %>%
+  pivot_longer(cols = c(ttl_dv_, ttl_n__), names_to = "LandUseType", values_to = "LandUse") %>%
+  mutate(LandUseType = recode(LandUseType, ttl_dv_ = "Developed", ttl_n__ = "Undeveloped"))
+
+# Plotting with facets for each crime type
+ggplot(london_data_by_crime_long, aes(x = LandUse, y = count, color = LandUseType)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE, aes(linetype = LandUseType)) +
+  labs(title = "Relationship between Land Use and Crime Counts by Crime Type in London",
+       x = "Land Use (hectares)", y = "Crime Counts",
+       color = "Land Use Type", linetype = "Land Use Type") +
+  theme_minimal() +
+  facet_wrap(~ crm_typ)  # Facet by crime type
+
+#Focus on only those crime types that have a significant relationship between either the developed or undeveloped land themes
+
+# Remove groups with insufficient data
+filtered_data <- london_data_by_crime_long %>%
+  group_by(crm_typ, LandUseType) %>%
+  filter(!is.na(count) & !is.na(LandUse) & n() > 1) %>%
+  ungroup()
+
+# Fit linear models for each CrimeType and LandUseType combination
+lm_results <- filtered_data %>%
+  group_by(crm_typ, LandUseType) %>%
+  nest() %>%
+  mutate(model = map(data, ~ lm(count ~ LandUse, data = .x)),
+         results = map(model, tidy)) %>%
+  unnest(results) %>%
+  filter(term == "LandUse") %>%
+  select(crm_typ, LandUseType, estimate, p.value)
+print(lm_results)
+
+
+# Filter crime types with significant relationships (p.value < 0.05)
+# Filter crime types with significant relationships (p.value < 0.05)
+significant_developed <- lm_results %>%
+  filter(LandUseType == "Developed" & p.value < 0.05) %>%
+  pull(crm_typ)
+
+significant_undeveloped <- lm_results %>%
+  filter(LandUseType == "Undeveloped" & p.value < 0.05) %>%
+  pull(crm_typ)
+
+significant_crime_types <- lm_results %>%
+  filter(p.value < 0.05) %>%
+  select(crm_typ) %>%
+  distinct()
+
+# Combine significant crime types
+significant_crime_types <- union(significant_developed, significant_undeveloped)
+
+# Join significant crime types back with the original data
+significant_data <- london_data_by_crime_long %>%
+  filter(crm_typ %in% significant_crime_types)
+
+# Plotting with facets for each significant crime type
+ggplot(significant_data, aes(x = LandUse, y = count, color = LandUseType)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", se = TRUE, aes(linetype = LandUseType)) +
+  labs(title = "Significant Relationships between Land Use and Crime Counts by Crime Type in London",
+       x = "Land Use (hectares)", y = "Crime Counts",
+       color = "Land Use Type", linetype = "Land Use Type") +
+  theme_minimal() +
+  facet_wrap(~ crm_typ)  # F
+
+
+```
+
+
+```{r hot spot analysis for london }
+### spatial weights matrix for london
+# Assuming 'full_data' is already read as an sf object
+# Compute the spatial weights matrix using contiguity (neighbors sharing boundaries)
+neighbors <- poly2nb(london_data)
+weights <- nb2listw(neighbors, style="W")
+
+# Moran's I global test
+moran_test <- moran.test(london_data$count, weights, zero.policy = TRUE)
+print(moran_test)
+
+# Local Moran's I (LISA)
+local_moran <- localmoran(london_data$count, weights, zero.policy = TRUE)
+
+# Add LISA results to the data
+london_data$LISA <- local_moran[, 1]
+london_data$LISA_pvalue <- local_moran[, 5]
+
+# Visualize hotspots using tmap
+tm_shape(london_data) +
+  tm_polygons("LISA", 
+              style = "quantile", 
+              palette = "-RdYlBu", 
+              title = "Local Moran's I") +
+  tm_layout(title = "Hotspot Analysis of Crime Counts by LSOA")
+```
+
+
+
+```{r spatial lag model for london }
+###### Spatial lag model
+slm <- lagsarlm(count ~ ttl_dv_ + ttl_n__, data = london_data, listw = weights)
+summary(slm)
+
+# Spatial lag model using detailed developed land categories
+slm_detailed <- lagsarlm(count ~ grp_cm_ + grp_dfn + grp_nds_ +
+                         grp_mn_ + grp_rsd + grp_th_ +
+                         grp_tr_, data = london_data, listw = weights)
+summary(slm_detailed)
+
+#Group Industry/Commerce (grp_nds_): Each additional hectare is associated with a significant increase in crime (coefficient = 3.691361, p < 2.2e-16), suggesting strong evidence that industrial or commercial land use is associated with higher crime rates.
+slm_subgroup <- lagsarlm(count ~ indstry + offices + retail + strg_n_ +            #Group Industry/Commerce (grp_nds_):
+                                 resdntl + ins____   +                             #Residential 
+                                 hghw___ + trnspr_ + utilits +                     #Transport 
+                                 undn___ + undntfd_b + undntfd_s + unknown,        #Other Develeoped Use
+                         data = london_data, listw = weights)
+summary(slm_subgroup)
+
+
+summary(slm)
+summary(slm_detailed)
+summary(slm_subgroup)
+
+```
+
+
+
+### Visualise these results 
+
+```{r}
+ #1) Map these coordinates 
+# Assuming coefficients are stored and spatial data is available
+# Calculate predicted values based on one of the models
+london_data$predicted_crime = predict(slm, type="response")
+
+# Plotting with tmap
+library(tmap)
+tmap_mode("plot")
+tm_shape(london_data) +
+  tm_fill("predicted_crime", title="Predicted Crime Rates", style="quantile", palette="viridis") +
+  tm_borders() +
+  tm_layout(main.title="Predicted Crime Rates Across London")
+
+
+### Coeffiecient plot 
+coef_table <- summary(slm)$coef
+if (is.null(coef_table)) {
+  coef_table <- cbind(Estimate = coef(slm), 
+                      StdError = sqrt(diag(vcov(slm))),
+                      zValue = coef(slm) / sqrt(diag(vcov(slm))))
+  
+  # Adding p-values
+  coef_table <- cbind(coef_table, PValue = 2 * pnorm(-abs(coef_table[, "zValue"])))
+}
+
+# Create a dataframe
+coef_df <- as.data.frame(coef_table)
+coef_df$Variable <- rownames(coef_df)
+rownames(coef_df) <- NULL  # Clean up row names
+
+# Display the dataframe
+print(coef_df)
+
+library(ggplot2)
+
+# Plotting the coefficients with significance highlighted
+ggplot(coef_df, aes(x = Variable, y = Estimate, fill = PValue < 0.05)) +
+  geom_col() +
+  geom_errorbar(aes(ymin = Estimate - 1.96 * StdError, ymax = Estimate + 1.96 * StdError), width = 0.2) +
+  labs(title = "Coefficients of Spatial Lag Model", y = "Coefficient Estimate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+### Residual Mapping 
+# Calculate residuals
+london_data$residuals = residuals(slm)
+
+tmap_mode("plot")
+tm_shape(london_data) +
+  tm_fill("residuals", title="Residuals", style="diverging", midpoint=0, palette="RdBu") +
+  tm_layout(main.title="Map of Model Residuals")
+
+
+
+###
+# Bind coefficient data into a single dataframe
+coefficients_all <- rbind(
+  transform(as.data.frame(summary_slm$coefficients), Model = "SLM"),
+  transform(as.data.frame(summary_slm_detailed$coefficients), Model = "SLM Detailed"),
+  transform(as.data.frame(summary_slm_subgroup$coefficients), Model = "SLM Subgroup")
+)
+
+coefficients_all <- coefficients_all %>%
+  pivot_longer(cols = -c(Model, Estimate, Std.Error, z.value, Pr...z..), names_to = "Variable")
+
+# Plotting
+ggplot(coefficients_all, aes(x = Variable, y = Estimate, fill = Model)) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  geom_errorbar(aes(ymin = Estimate - 1.96 * `Std.Error`, ymax = Estimate + 1.96 * `Std.Error`), 
+                position = position_dodge(width = 0.8), width = 0.25) +
+  labs(title = "Comparison of Coefficients Across Models", x = "Variables", y = "Coefficient Estimate") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+
+```
+
+
+
+```{r spatial error model}
+library(sf)
+library(sp)
+library(spdep)
+library(spatialreg)
+
+# Step 1: Load and inspect data
+# Ensure full_data is of class 'sf'
+class(london_data)
+
+# Step 2: Check and handle missing data
+required_vars <- c("count", "indstry", "offices", "retail", "strg_n_", "resdntl", "ins____", 
+                   "hghw___", "trnspr_", "utilits", "undn___", "undntfd_b", "undntfd_s", 
+                   "unknown")
+
+# Summarize missing data
+missing_summary <- sapply(london_data[required_vars], function(x) sum(is.na(x)))
+print(missing_summary)
+
+# Handle missing data
+# Option 1: Remove rows with missing data
+# london_data <- na.omit(london_data)
+
+# Option 2: Impute missing data (example using median imputation)
+for (var in required_vars) {
+  london_data[[var]][is.na(london_data[[var]])] <- median(london_data[[var]], na.rm = TRUE)
+}
+
+# Verify the number of rows
+print(nrow(london_data))  # Should match with the original count
+
+# Step 3: Ensure unique identifiers
+# If lsoa21nm is not appropriate, create a unique identifier based on row numbers
+london_data$unique_id <- as.character(seq_len(nrow(london_data)))
+
+# Step 4: Coerce the sf object into a new sp object
+ncovr_s_sp <- as(london_data, "Spatial")
+
+# Ensure row.names match the unique IDs
+if (nrow(ncovr_s_sp) == length(london_data$unique_id)) {
+  ncovr_s_sp <- spChFIDs(ncovr_s_sp, london_data$unique_id)
+} else {
+  stop("The lengths of ncovr_s_sp and unique_id do not match.")
+}
+
+# Step 5: Create a list of neighbours using the Queen criteria
+w_s <- poly2nb(ncovr_s_sp, row.names = row.names(ncovr_s_sp))
+
+# Convert the list of neighbors to a spatial weights matrix
+wm_s <- nb2mat(w_s, style = 'B')
+
+# Convert the spatial weights matrix to a listw object
+rwm_s <- mat2listw(wm_s, style = 'W')
+
+# Step 6: Fit the spatial error model
+fit_3_err <- errorsarlm(count ~ indstry + offices + retail + strg_n_ +            # Group Industry/Commerce (grp_nds_):
+                                 resdntl + ins____ +                             # Residential 
+                                 hghw___ + trnspr_ + utilits +                   # Transport 
+                                 undn___ + undntfd_b + undntfd_s + unknown, 
+                                 data = london_data, listw = rwm_s)
+
+# Step 7: Print summary of the model
+summary(fit_3_err)
+
+
+### Plot 
+# Residuals plot
+plot(fit_3_err$residuals, main = "Residuals Plot", ylab = "Residuals", xlab = "Index")
+abline(h = 0, col = "red")
+
+# Add predictions and residuals to the london_data
+predicted_values <- predict(fit_3_err, newdata = london_data, listw = rwm_s, type = "response")
+residuals_values <- residuals(fit_3_err)
+
+# Add predictions and residuals to the london_data
+london_data$predicted <- as.numeric(predicted_values)
+london_data$residuals <- residuals_values
+
+# Plot predicted values
+ggplot(data = london_data) +
+  geom_sf(aes(fill = predicted)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Predicted Values", fill = "Predicted")
+
+# Plot residuals
+ggplot(data = london_data) +
+  geom_sf(aes(fill = residuals)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Residuals", fill = "Residuals")
+
+
+coefficients <- summary(fit_3_err)$Coef[, 1]
+stderr <- summary(fit_3_err)$Coef[, 2]
+zvalues <- summary(fit_3_err)$Coef[, 3]
+pvalues <- summary(fit_3_err)$Coef[, 4]
+
+coef_df <- data.frame(
+  Variable = names(coefficients),
+  Estimate = coefficients,
+  StdError = stderr,
+  zValue = zvalues,
+  pValue = pvalues
+)
+
+# Remove NA values (e.g., for variables not included due to singularities)
+coef_df <- na.omit(coef_df)
+
+# Plot coefficients
+ggplot(coef_df, aes(x = Estimate, y = reorder(Variable, Estimate))) +
+  geom_point() +
+  geom_errorbarh(aes(xmin = Estimate - 1.96 * StdError, xmax = Estimate + 1.96 * StdError), height = 0.2) +
+  theme_minimal() +
+  labs(title = "Coefficient Plot", x = "Estimate", y = "Variable")
+
+# Load necessary libraries
+library(ggplot2)
+
+
+# Create a dataframe with proper variable names
+results <- data.frame(
+  Predictor = factor(c("Industry", "Offices", "Retail", "Storage", "Residential", "Institutional", "Transport", "Undefined Built", "Undefined Structure"),
+                     levels = c("Industry", "Offices", "Retail", "Storage", "Residential", "Institutional", "Transport", "Undefined Built", "Undefined Structure")),
+  Estimate = c(-0.679756, 4.312876, 12.556124, -1.753366, 1.454210, 7.678709, 0.313974, 4.955264, -1.673717)
+)
+
+# Create the bar chart
+ggplot(results, aes(x = Predictor, y = Estimate, fill = Predictor)) +
+  geom_bar(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Significant Predictors in the Spatial Error Model", y = "Estimate", x = "Predictor") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+###
+# Extract residuals from the model
+residuals <- residuals(fit_3_err)
+
+# Assuming 'london_data' has a unique identifier for merging
+london_data$residuals <- residuals
+ggplot(london_data) +
+  geom_sf(aes(fill = residuals)) +
+  scale_fill_viridis_c() +
+  theme_minimal() +
+  labs(title = "Heatmap of Model Residuals", fill = "Residuals")
+```
+
+
+
+
